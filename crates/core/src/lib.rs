@@ -114,6 +114,25 @@ pub struct SystemInfo {
     pub trashed_blocks: u32,
 }
 
+/// Total bytes the database occupies, sidecars included.
+///
+/// In WAL mode most recent writes live in `-wal` until a checkpoint, so the
+/// main file alone can read as a few kilobytes for a course with ten chapters
+/// in it. Reporting that would be actively misleading.
+fn db_bytes_on_disk(p: &paths::Paths) -> i64 {
+    let main = p.db_file();
+    ["", "-wal", "-shm"]
+        .iter()
+        .map(|suffix| {
+            let mut name = main.as_os_str().to_os_string();
+            name.push(suffix);
+            std::fs::metadata(std::path::PathBuf::from(name))
+                .map(|m| m.len() as i64)
+                .unwrap_or(0)
+        })
+        .sum()
+}
+
 pub fn system_info(conn: &Connection, p: &paths::Paths, app_version: &str) -> Result<SystemInfo> {
     let count =
         |sql: &str| -> Result<u32> { Ok(conn.query_row(sql, [], |r| r.get::<_, i64>(0))? as u32) };
@@ -130,9 +149,7 @@ pub fn system_info(conn: &Connection, p: &paths::Paths, app_version: &str) -> Re
         db_path: paths::display_path(&p.db_file()),
         media_dir: paths::display_path(&p.media_root()),
         log_dir: paths::display_path(&p.logs_root()),
-        db_bytes: std::fs::metadata(p.db_file())
-            .map(|m| m.len() as i64)
-            .unwrap_or(0),
+        db_bytes: db_bytes_on_disk(p),
         media_bytes,
         asset_bytes_tracked: repo::asset::total_bytes(conn)?,
         chapter_count: count("SELECT count(*) FROM chapter WHERE deleted_at IS NULL")?,

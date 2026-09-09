@@ -1373,7 +1373,28 @@ fn system_info_reports_real_numbers() {
     assert_eq!(info.asset_count, 1);
     assert_eq!(info.asset_bytes_tracked, 10);
     assert_eq!(info.media_bytes, 10);
-    assert!(info.db_bytes > 0);
+    // WAL mode keeps recent writes in the sidecar, so the reported size must
+    // count it — the main file alone can be a few kilobytes for a real course.
+    let main_only = std::fs::metadata(h.paths.db_file()).unwrap().len() as i64;
+    let sidecars: i64 = ["-wal", "-shm"]
+        .iter()
+        .map(|suffix| {
+            let mut name = h.paths.db_file().into_os_string();
+            name.push(suffix);
+            std::fs::metadata(std::path::PathBuf::from(name))
+                .map(|m| m.len() as i64)
+                .unwrap_or(0)
+        })
+        .sum();
+    assert!(
+        sidecars > 0,
+        "this test needs a WAL sidecar to be meaningful"
+    );
+    assert_eq!(
+        info.db_bytes,
+        main_only + sidecars,
+        "the reported database size ignores the WAL sidecar"
+    );
     assert_eq!(info.schema_version, db::migrations::target_version());
 }
 
