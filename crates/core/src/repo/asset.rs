@@ -40,6 +40,21 @@ pub fn find_by_hash(conn: &Connection, sha256: &str, bytes: i64) -> Result<Optio
         .optional()?)
 }
 
+/// Cheap dedupe pre-filter: is any asset exactly this many bytes?
+///
+/// Hashing a multi-gigabyte file costs a full read. Byte length costs an index
+/// lookup, and a mismatch rules out a duplicate outright.
+pub fn any_with_size(conn: &Connection, bytes: i64) -> Result<bool> {
+    Ok(conn
+        .query_row(
+            "SELECT 1 FROM asset WHERE bytes = ?1 LIMIT 1",
+            [bytes],
+            |_| Ok(true),
+        )
+        .optional()?
+        .unwrap_or(false))
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn insert(
     conn: &Connection,

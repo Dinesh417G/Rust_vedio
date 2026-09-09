@@ -1,4 +1,5 @@
 import { useImports } from "@/store/imports";
+import type { BlockState } from "@/lib/types";
 import type { BlockRendererProps } from "./common";
 import type { ImportingInfo, MissingInfo } from "../BlockShell";
 
@@ -10,6 +11,7 @@ import type { ImportingInfo, MissingInfo } from "../BlockShell";
  * unconditionally at the top of a renderer.
  */
 export function useAssetShellExtras(p: BlockRendererProps): {
+  state: BlockState;
   importing?: ImportingInfo;
   missing?: MissingInfo;
 } {
@@ -17,8 +19,13 @@ export function useAssetShellExtras(p: BlockRendererProps): {
     Object.values(s.byTicket).find((i) => i.blockId === p.block.id),
   );
 
+  // The server computes `Importing` from its own in-flight registry, but the
+  // ticket lands here before the block is re-read. Trusting the local store as
+  // well means the progress bar appears on the same frame the import starts.
+  const state: BlockState = active ? "importing" : p.block.state;
+
   const importing: ImportingInfo | undefined =
-    p.block.state === "importing"
+    state === "importing"
       ? {
           originalName: active?.originalName ?? "",
           bytesDone: active?.bytesDone ?? 0,
@@ -29,7 +36,7 @@ export function useAssetShellExtras(p: BlockRendererProps): {
       : undefined;
 
   const missing: MissingInfo | undefined =
-    p.block.state === "missing"
+    state === "missing"
       ? {
           expectedPath: p.block.asset?.resolvedPath ?? "(unknown path)",
           onLocate: p.onLocate,
@@ -38,5 +45,5 @@ export function useAssetShellExtras(p: BlockRendererProps): {
         }
       : undefined;
 
-  return { importing, missing };
+  return { state, importing, missing };
 }

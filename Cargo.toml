@@ -18,6 +18,20 @@ uuid = { version = "1", features = ["v7", "serde"] }
 sha2 = "0.10"
 rusqlite = { version = "0.32", features = ["bundled", "backup"] }
 
+# Hashing and compression dominate import and export time. Unoptimised they
+# are an order of magnitude slower, which makes a debug build feel broken on a
+# multi-gigabyte file even though the release build is fine.
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.dev.package.digest]
+opt-level = 3
+[profile.dev.package.cpufeatures]
+opt-level = 3
+[profile.dev.package.flate2]
+opt-level = 3
+[profile.dev.package.miniz_oxide]
+opt-level = 3
+
 [profile.release]
 opt-level = "s"
 lto = true

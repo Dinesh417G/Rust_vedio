@@ -57,6 +57,18 @@ export function Inspector({ chapterId }: { chapterId: string | undefined }) {
   );
 }
 
+/** A placeholder that describes the block in front of you, not a video. */
+const CAPTION_PLACEHOLDER: Record<BlockKind, string> = {
+  video: "This video covers moves, clones and the borrow checker",
+  image: "How the stack and the heap relate",
+  text: "Why the borrow checker exists at all",
+  code: "The example this section walks through",
+  callout: "The mistake people make here",
+  attachment: "The worksheet for this section",
+  quiz: "A few questions to confirm the idea landed",
+  divider: "A break between sections",
+};
+
 function BlockInspector({ block }: { block: BlockView }) {
   const toast = useUi((s) => s.toast);
   const pickAndImport = usePickAndImport();
@@ -112,7 +124,7 @@ function BlockInspector({ block }: { block: BlockView }) {
           id="insp-caption"
           className="input min-h-[5rem] resize-y text-[13px]"
           value={caption}
-          placeholder="This video covers moves, clones and the borrow checker"
+          placeholder={CAPTION_PLACEHOLDER[block.kind]}
           onChange={(e) => {
             setCaption(e.target.value);
             schedule({ captionMd: e.target.value });

@@ -83,6 +83,26 @@ bottom of each phase.
   This is what keeps the UI responsive while a 2 GB file streams in, with one
   connection as the spec requires.
 
+- **The asset protocol scope is `$APPDATA/media/**`, not
+  `$APPDATA/<identifier>/media/**`.** The specification's config snippet has
+  the identifier in the path twice. In Tauri v2 `$APPDATA` already resolves to
+  the *application's* data directory — `%APPDATA%\in.electronix.rustclass` on
+  Windows — so adding the identifier again produces a path that can never
+  match. The symptom is silent: no error in the UI, just a broken image icon
+  and a video that will not load. It cost an hour to find and is written down
+  here so it is never reintroduced.
+
+- **Dedupe pre-filters on byte length before it hashes.** Hashing up front
+  would let an import skip the copy entirely when the file is already in the
+  library, but it costs a full read of *every* import — doubling the time for
+  the common case, a file that is not a duplicate. Byte length is an index
+  lookup and rules out a duplicate outright. Only when some existing asset is
+  exactly the same size is a full hash worth paying for; otherwise the copy
+  hashes as it goes and a duplicate is caught at the end, where the wasted copy
+  is deleted. A 1.2 GB import now reads the file once instead of twice, and
+  progress runs continuously from 0 to 100 rather than sitting at zero through
+  a silent hashing pass.
+
 - **`reference` imports are hashed too.** Nothing forces it — the bytes are not
   being copied. Doing it anyway means dedupe and integrity checks behave
   identically for both modes, and a reference whose original was swapped out is
@@ -98,6 +118,12 @@ bottom of each phase.
   A referenced file belongs to the user, not to the app; GC drops the row and
   leaves the file alone. Managed copies are deleted only after a dry run has
   listed them.
+
+- **`sha2` and the compression crates are optimised even in debug builds.**
+  Unoptimised, SHA-256 runs roughly an order of magnitude slower, which makes a
+  debug build look broken on a multi-gigabyte import even though the release
+  build is fine. Five `[profile.dev.package.*]` entries cost nothing and keep
+  development honest about how the app actually performs.
 
 - **Zip entries for media are `Stored`, not `Deflated`.** An MP4 is already
   compressed. Deflating a 2 GB file to save nothing would add minutes to every

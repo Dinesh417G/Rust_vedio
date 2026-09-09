@@ -102,6 +102,12 @@ CREATE VIRTUAL TABLE search_idx USING fts5(
   entity_id UNINDEXED, entity_type UNINDEXED, title, body, tokenize = 'porter'
 );
 "#,
+    // ---- v2: index the dedupe pre-filter -----------------------------------
+    // `any_with_size` runs on every import to decide whether a full hash is
+    // worth paying for; without this it is a table scan.
+    r#"
+CREATE INDEX idx_asset_bytes ON asset(bytes);
+"#,
 ];
 
 pub fn current_version(conn: &Connection) -> Result<i64> {
@@ -137,6 +143,25 @@ pub fn migrate(conn: &mut Connection) -> Result<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_ladder_has_more_than_one_rung() {
+        // Guards the ladder itself: a second migration must apply cleanly on
+        // top of the first, not just on an empty database.
+        assert!(target_version() >= 2);
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(MIGRATIONS[0]).unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
+        assert_eq!(migrate(&mut conn).unwrap(), target_version());
+        let n: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE name = 'idx_asset_bytes'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 1, "v2 did not apply on top of v1");
+    }
 
     #[test]
     fn migrates_up_from_empty() {

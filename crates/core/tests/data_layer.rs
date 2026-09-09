@@ -581,6 +581,48 @@ fn importing_a_file_makes_the_block_ready_and_a_deleted_file_makes_it_missing() 
 }
 
 #[test]
+fn an_imported_copy_is_byte_identical_and_readable_at_any_offset() {
+    // Seeking inside a multi-gigabyte video works because the asset protocol
+    // serves HTTP Range requests against the stored file. That only holds if
+    // the file we store is the source verbatim — not re-containered, not
+    // chunked, not transformed. This is the half of that contract we own.
+    let mut h = Harness::new();
+    let data: Vec<u8> = (0..(3 * 1024 * 1024 + 1234u32))
+        .map(|i| (i.wrapping_mul(2654435761) >> 13) as u8)
+        .collect();
+    let src = write_file(&h._dir.path().join("source"), "lesson.mp4", &data);
+    let c = h.new_chapter("Seeking", None);
+    let v = h.add_block(&c, BlockKind::Video, "Lesson");
+    let (asset_id, _) = h.import(&src, Some(&v));
+
+    let stored = asset_repo::get_row(&h.conn, &asset_id)
+        .unwrap()
+        .absolute(&h.paths);
+    let on_disk = std::fs::read(&stored).unwrap();
+    assert_eq!(
+        on_disk.len(),
+        data.len(),
+        "stored size differs from the source"
+    );
+    assert_eq!(on_disk, data, "the stored copy is not byte-identical");
+
+    // A ranged read lands on exactly the bytes the same offset holds in the
+    // original, which is what a seek resolves to.
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(&stored).unwrap();
+    for offset in [0u64, 1024, 1_048_576, (data.len() - 4096) as u64] {
+        f.seek(SeekFrom::Start(offset)).unwrap();
+        let mut buf = [0u8; 512];
+        let n = f.read(&mut buf).unwrap();
+        assert_eq!(
+            &buf[..n],
+            &data[offset as usize..offset as usize + n],
+            "ranged read at offset {offset} did not match the source"
+        );
+    }
+}
+
+#[test]
 fn the_same_file_under_a_different_name_is_deduped() {
     let mut h = Harness::new();
     let src_dir = h._dir.path().join("source");
@@ -613,6 +655,98 @@ fn the_same_file_under_a_different_name_is_deduped() {
         assert_eq!(view.state, BlockState::Ready);
         assert_eq!(view.asset.unwrap().id, id1);
     }
+}
+
+#[test]
+fn a_new_file_is_imported_in_a_single_pass() {
+    // Dedupe must not cost a second read of every import. With no same-sized
+    // asset in the library the file is read exactly once — the copy hashes as
+    // it goes — so progress is reported over one pass, not two.
+    let mut h = Harness::new();
+    let data: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
+    let src = write_file(&h._dir.path().join("source"), "fresh.mp4", &data);
+    let c = h.new_chapter("Single pass", None);
+    let v = h.add_block(&c, BlockKind::Video, "Lesson");
+
+    let mut ticks: Vec<(i64, i64)> = Vec::new();
+    let req = ImportRequest {
+        path: src.to_string_lossy().to_string(),
+        block_id: Some(v.clone()),
+        kind: None,
+        mode: ImportMode::Copy,
+    };
+    let out =
+        rustclass_core::assets::import(&h.conn, &h.paths, &req, &CancelFlag::new(), |d, t| {
+            ticks.push((d, t))
+        })
+        .unwrap();
+    assert!(!out.deduped);
+
+    // Progress is monotonic and never rewinds, which is what a second pass
+    // would look like from the outside.
+    let mut previous = -1i64;
+    for (done, _) in &ticks {
+        assert!(*done >= previous, "progress went backwards: {ticks:?}");
+        previous = *done;
+    }
+    assert_eq!(ticks.last().unwrap().0, data.len() as i64);
+    assert_eq!(
+        ticks.iter().filter(|(d, _)| *d == 0).count(),
+        1,
+        "progress restarted from zero, so the file was read twice: {ticks:?}"
+    );
+}
+
+#[test]
+fn a_duplicate_copy_is_discarded_rather_than_left_on_disk() {
+    // When two different files happen to share a byte length, the pre-hash
+    // catches the duplicate before any copy. When a duplicate slips past that
+    // check the copy is deleted rather than orphaned.
+    let mut h = Harness::new();
+    let dir = h._dir.path().join("source");
+    let payload = b"exactly the same bytes in both files";
+    let a = write_file(&dir, "first.mp4", payload);
+    let b = write_file(&dir, "second.mp4", payload);
+    let c = h.new_chapter("Dupes", None);
+    let v1 = h.add_block(&c, BlockKind::Video, "One");
+    let v2 = h.add_block(&c, BlockKind::Video, "Two");
+
+    let (id1, d1) = h.import(&a, Some(&v1));
+    let (id2, d2) = h.import(&b, Some(&v2));
+    assert!(!d1);
+    assert!(d2, "the second import must dedupe");
+    assert_eq!(id1, id2);
+
+    let files = integrity::walk_media(&h.paths).unwrap();
+    assert_eq!(
+        files.len(),
+        1,
+        "a discarded copy was left behind: {files:?}"
+    );
+    // And no `.part` leftovers either.
+    assert!(integrity::scan_partials(&h.paths).unwrap().is_empty());
+}
+
+#[test]
+fn a_same_sized_but_different_file_is_not_deduped() {
+    // The byte-length pre-filter must never be mistaken for identity.
+    let mut h = Harness::new();
+    let dir = h._dir.path().join("source");
+    let a = write_file(&dir, "a.mp4", b"aaaaaaaaaaaaaaaa");
+    let b = write_file(&dir, "b.mp4", b"bbbbbbbbbbbbbbbb");
+    assert_eq!(
+        std::fs::metadata(&a).unwrap().len(),
+        std::fs::metadata(&b).unwrap().len()
+    );
+    let c = h.new_chapter("Same size", None);
+    let v1 = h.add_block(&c, BlockKind::Video, "One");
+    let v2 = h.add_block(&c, BlockKind::Video, "Two");
+
+    let (id1, _) = h.import(&a, Some(&v1));
+    let (id2, deduped) = h.import(&b, Some(&v2));
+    assert!(!deduped);
+    assert_ne!(id1, id2);
+    assert_eq!(integrity::walk_media(&h.paths).unwrap().len(), 2);
 }
 
 #[test]

@@ -71,6 +71,11 @@ pub async fn asset_import(
         deduped_asset_id: None,
     };
 
+    // The block's state is computed from the in-flight import registry, so the
+    // frontend has to re-read it now to see `Importing`. Without this the
+    // placeholder sits there looking untouched until the copy finishes.
+    super::notify(&app, "block", req.block_id.clone());
+
     let app2 = app.clone();
     tauri::async_runtime::spawn(async move {
         let result = run_import(&app2, req.clone(), ticket_id.clone(), cancel).await;
@@ -115,26 +120,43 @@ async fn run_import(
     ticket_id: String,
     cancel: CancelFlag,
 ) -> Result<(String, bool), AppError> {
-    // --- phase 1: hash, off the UI thread and without the db lock -----------
-    let probe = {
-        let app = app.clone();
-        let ticket = ticket_id.clone();
-        let block_id = req.block_id.clone();
-        let req = req.clone();
-        let cancel = cancel.clone();
-        tauri::async_runtime::spawn_blocking(move || {
-            emit_progress(&app, &ticket, &block_id, None, 0, 0);
-            assets::probe(&req, &cancel)
-        })
-        .await
-        .map_err(|e| AppError::new("internal", e.to_string()))??
+    // --- phase 1: stat only. Instant, no lock, no read. ---------------------
+    let probe = assets::probe(&req)?;
+    emit_progress(app, &ticket_id, &req.block_id, None, 0, probe.bytes);
+
+    let paths = {
+        let state = app.state::<AppState>();
+        state.paths.clone()
     };
 
-    // --- phase 2: dedupe probe, a very short lock ---------------------------
-    {
+    // --- phase 2: dedupe, but only when it is worth the read ----------------
+    // A pre-hash costs a full pass over the file. Byte length is free and
+    // rules out a duplicate outright, so the full hash only runs when some
+    // existing asset is exactly this size.
+    let same_size = {
         let state = app.state::<AppState>();
         let conn = state.db.lock().await;
-        if let Some(existing) = asset_repo::find_by_hash(&conn, &probe.sha256, probe.bytes)? {
+        asset_repo::any_with_size(&conn, probe.bytes)?
+    };
+
+    if same_size {
+        let sha = {
+            let app = app.clone();
+            let ticket = ticket_id.clone();
+            let block_id = req.block_id.clone();
+            let src = probe.src.clone();
+            let cancel = cancel.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                assets::hash_file(&src, &cancel, |done, total| {
+                    emit_progress(&app, &ticket, &block_id, None, done, total);
+                })
+            })
+            .await
+            .map_err(|e| AppError::new("internal", e.to_string()))??
+        };
+        let state = app.state::<AppState>();
+        let conn = state.db.lock().await;
+        if let Some(existing) = asset_repo::find_by_hash(&conn, &sha.0, sha.1)? {
             emit_progress(
                 app,
                 &ticket_id,
@@ -143,20 +165,12 @@ async fn run_import(
                 probe.bytes,
                 probe.bytes,
             );
-            if let Some(block_id) = &req.block_id {
-                let importing = std::collections::HashSet::new();
-                let ctx = ReadCtx::new(&state.paths, &importing);
-                block_repo::set_asset(&conn, &ctx, block_id, Some(&existing.id))?;
-            }
+            attach(&conn, &state, &req, &existing.id)?;
             return Ok((existing.id, true));
         }
     }
 
-    // --- phase 3: the copy itself, again with no lock held ------------------
-    let paths = {
-        let state = app.state::<AppState>();
-        state.paths.clone()
-    };
+    // --- phase 3: copy and hash in one pass, with no lock held --------------
     let placement = {
         let app = app.clone();
         let ticket = ticket_id.clone();
@@ -164,6 +178,7 @@ async fn run_import(
         let probe = probe.clone();
         let mode = req.mode;
         let cancel = cancel.clone();
+        let paths = paths.clone();
         tauri::async_runtime::spawn_blocking(move || {
             assets::place(&paths, &probe, mode, &cancel, |done, total| {
                 emit_progress(&app, &ticket, &block_id, None, done, total);
@@ -174,18 +189,36 @@ async fn run_import(
     };
 
     // --- phase 4: record the row and attach it ------------------------------
-    let asset_id = placement.asset_id.clone();
-    {
-        let state = app.state::<AppState>();
-        let conn = state.db.lock().await;
-        assets::record(&conn, &probe, &placement, req.mode)?;
-        if let Some(block_id) = &req.block_id {
-            let importing = std::collections::HashSet::new();
-            let ctx = ReadCtx::new(&state.paths, &importing);
-            block_repo::set_asset(&conn, &ctx, block_id, Some(&asset_id))?;
-        }
+    let state = app.state::<AppState>();
+    let conn = state.db.lock().await;
+
+    // A same-size asset can appear between the check above and here, and a
+    // reference import never took the pre-hash path at all.
+    if let Some(existing) = asset_repo::find_by_hash(&conn, &placement.sha256, placement.bytes)? {
+        assets::discard(&paths, &placement, req.mode)?;
+        attach(&conn, &state, &req, &existing.id)?;
+        return Ok((existing.id, true));
     }
-    Ok((asset_id, false))
+
+    assets::record(&conn, &probe, &placement, req.mode)?;
+    attach(&conn, &state, &req, &placement.asset_id)?;
+    Ok((placement.asset_id, false))
+}
+
+/// Points the requesting block at the asset the import landed on.
+fn attach(
+    conn: &rusqlite::Connection,
+    state: &tauri::State<'_, AppState>,
+    req: &ImportRequest,
+    asset_id: &str,
+) -> Result<(), AppError> {
+    let Some(block_id) = &req.block_id else {
+        return Ok(());
+    };
+    let importing = std::collections::HashSet::new();
+    let ctx = ReadCtx::new(&state.paths, &importing);
+    block_repo::set_asset(conn, &ctx, block_id, Some(asset_id))?;
+    Ok(())
 }
 
 fn emit_progress(

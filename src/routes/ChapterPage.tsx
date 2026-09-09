@@ -18,7 +18,9 @@ import {
 import { ArrowLeft, ArrowRight, Check, CircleCheck } from "lucide-react";
 import * as ipc from "@/lib/ipc";
 import type { BlockKind, BlockPatch, BlockView, ChapterPatch } from "@/lib/types";
+import { useQueryClient } from "@tanstack/react-query";
 import {
+  qk,
   useChapter,
   useChapterComplete,
   useChapters,
@@ -41,6 +43,7 @@ export function ChapterPage() {
   const navigate = useNavigate();
   const { data: chapter, isLoading, error } = useChapter(id);
   const { data: chapters = [] } = useChapters();
+  const qc = useQueryClient();
 
   const mode = useUi((s) => s.mode);
   const authoring = mode === "author";
@@ -75,6 +78,14 @@ export function ChapterPage() {
   useEffect(() => {
     if (id) expandChapter(id);
   }, [id, expandChapter]);
+
+  // A file can vanish while the app is running — a drive unplugged, a folder
+  // tidied up. The spec asks for an integrity check on start *and* on chapter
+  // open, so the "files are missing" banner reflects the disk as it is now
+  // rather than as it was at launch.
+  useEffect(() => {
+    if (id) void qc.invalidateQueries({ queryKey: qk.integrity });
+  }, [id, qc]);
 
   // Scroll the flashed block into view after a search jump.
   useEffect(() => {

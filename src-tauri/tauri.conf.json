@@ -27,8 +27,10 @@
       "assetProtocol": {
         "enable": true,
         "scope": [
-          "$APPDATA/in.electronix.rustclass/media/**",
-          "$APPLOCALDATA/in.electronix.rustclass/media/**"
+          "$APPDATA/media/*",
+          "$APPDATA/media/**",
+          "$APPLOCALDATA/media/*",
+          "$APPLOCALDATA/media/**"
         ]
       },
       "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' asset: http://asset.localhost blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost"
@@ -36,9 +38,11 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "publisher": "ElectronIx",
-    "copyright": "© ElectronIx",
+    "copyright": "\u00a9 ElectronIx",
     "category": "Education",
     "shortDescription": "An offline-first digital classroom",
     "longDescription": "RustClass is an offline-first desktop digital classroom for authoring and studying a course. Structure exists independently of content: plan every chapter and block first, fill in the videos later.",
@@ -50,10 +54,15 @@
       "icons/icon.ico"
     ],
     "windows": {
-      "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
       "nsis": {
         "installMode": "perMachine",
-        "languages": ["English"],
+        "languages": [
+          "English"
+        ],
         "displayLanguageSelector": false
       }
     }
