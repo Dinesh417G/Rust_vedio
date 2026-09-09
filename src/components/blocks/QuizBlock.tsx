@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Check, CircleHelp, Plus, Trash2, X } from "lucide-react";
+import { useInlineEditor } from "@/lib/useInlineEditor";
 import { BlockShell, EmptyCard } from "../BlockShell";
 import { Markdown } from "../Markdown";
 import { cx } from "@/lib/format";
@@ -16,7 +17,7 @@ function blankQuestion(): QuizQuestion {
 export function QuizBlock(props: BlockRendererProps) {
   const { block, authoring, onPatch, onLearnEmpty } = props;
   const meta = quizMeta(block);
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useInlineEditor(authoring);
   const [answers, setAnswers] = useState<Record<string, number>>({});
 
   const write = (questions: QuizQuestion[]) =>
@@ -222,9 +223,9 @@ export function QuizBlock(props: BlockRendererProps) {
   return (
     <BlockShell
       {...shellProps(props)}
-      ready={editing && authoring ? editor : player}
+      ready={editing ? editor : player}
       empty={
-        editing && authoring ? (
+        editing ? (
           editor
         ) : (
           <EmptyCard

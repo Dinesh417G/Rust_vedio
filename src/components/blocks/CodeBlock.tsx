@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Code2, Copy } from "lucide-react";
+import { useInlineEditor } from "@/lib/useInlineEditor";
 import { BlockShell, EmptyCard } from "../BlockShell";
 import { CodeView, CODE_LANGS, normalizeLang } from "../CodeView";
 import { SaveIndicator } from "../SaveIndicator";
@@ -12,7 +13,7 @@ import { shellProps } from "./TextBlock";
 export function CodeBlock(props: BlockRendererProps) {
   const { block, authoring, onPatch, onLearnEmpty } = props;
   const toast = useUi((s) => s.toast);
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useInlineEditor(authoring);
   const [draft, setDraft] = useState(block.codeText ?? "");
   const area = useRef<HTMLTextAreaElement>(null);
   const lang = normalizeLang(block.codeLang);

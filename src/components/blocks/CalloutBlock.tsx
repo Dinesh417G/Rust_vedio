@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Info, Lightbulb, OctagonAlert, TriangleAlert } from "lucide-react";
+import { useInlineEditor } from "@/lib/useInlineEditor";
 import { BlockShell, EmptyCard } from "../BlockShell";
 import { Markdown } from "../Markdown";
 import { SaveIndicator } from "../SaveIndicator";
@@ -45,7 +46,7 @@ export function CalloutBlock(props: BlockRendererProps) {
   const spec = TONES[tone];
   const Icon = spec.icon;
 
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useInlineEditor(authoring);
   const [draft, setDraft] = useState(block.bodyMd ?? "");
   const area = useRef<HTMLTextAreaElement>(null);
   const { status, schedule, flush } = useAutosave(draft, (v: string) =>

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { PenLine } from "lucide-react";
+import { useInlineEditor } from "@/lib/useInlineEditor";
 import { BlockShell, EmptyCard } from "../BlockShell";
 import { Markdown } from "../Markdown";
 import { SaveIndicator } from "../SaveIndicator";
@@ -8,7 +9,7 @@ import type { BlockRendererProps } from "./common";
 
 export function TextBlock(props: BlockRendererProps) {
   const { block, authoring, onPatch, onLearnEmpty } = props;
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useInlineEditor(authoring);
   const [draft, setDraft] = useState(block.bodyMd ?? "");
   const area = useRef<HTMLTextAreaElement>(null);
 
