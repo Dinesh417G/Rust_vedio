@@ -9,7 +9,6 @@ use tracing_subscriber::prelude::*;
 
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut builder = tauri::Builder::default();
 

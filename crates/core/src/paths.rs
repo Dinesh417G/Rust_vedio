@@ -260,6 +260,25 @@ mod tests {
         );
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn windows_long_paths_get_the_verbatim_prefix() {
+        // Over 260 characters Windows refuses the path outright unless it
+        // carries `\\?\`. This only compiles and runs on Windows, so it is the
+        // cross-compile check that keeps it honest.
+        let long = PathBuf::from(format!(r"C:\media\{}\file.mp4", "d".repeat(300)));
+        let prefixed = long_path(&long);
+        assert!(prefixed.to_string_lossy().starts_with(r"\\?\"));
+
+        // Short paths are left exactly as they are.
+        let short = PathBuf::from(r"C:\media\a.mp4");
+        assert_eq!(long_path(&short), short);
+
+        // And an already-prefixed path is not prefixed twice.
+        let already = PathBuf::from(format!(r"\\?\C:\media\{}\file.mp4", "d".repeat(300)));
+        assert_eq!(long_path(&already), already);
+    }
+
     #[test]
     fn codec_support_matches_webview2_reality() {
         assert!(is_webview_playable("lesson.mp4"));

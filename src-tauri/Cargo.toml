@@ -9,7 +9,11 @@ publish.workspace = true
 
 [lib]
 name = "rustclass_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# RustClass is a Windows desktop application. The `staticlib` and `cdylib`
+# crate types in the stock Tauri template exist only to support mobile targets,
+# and a cdylib of this size exceeds what mingw's linker can export, so a
+# Windows cross-build fails at the link step for no reason that matters here.
+crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

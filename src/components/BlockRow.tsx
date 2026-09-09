@@ -126,7 +126,21 @@ export function BlockRow(props: BlockRowProps) {
     <div
       ref={setNodeRef}
       id={`block-${block.id}`}
-      style={{ transform: CSS.Translate.toString(transform), transition }}
+      style={{
+        transform: CSS.Translate.toString(transform),
+        transition,
+        // Browser-native virtualisation. Off-screen blocks skip layout, style
+        // and paint entirely, which is what keeps a 100-block chapter at 60fps.
+        // Unlike a windowing library it leaves every node in the DOM, so
+        // dnd-kit's sortable context, in-page search and anchor links all keep
+        // working. `contain-intrinsic-size` gives the scrollbar a sane guess
+        // for the height of what has not been rendered yet.
+        //
+        // Not applied while dragging: the dragged row must stay measurable.
+        ...(isDragging
+          ? {}
+          : { contentVisibility: "auto", containIntrinsicSize: "auto 320px" }),
+      }}
       className={cx(
         "relative scroll-mt-24 rounded-xl px-3 py-2",
         isDragging && "z-20 opacity-60 shadow-2xl",

@@ -144,3 +144,30 @@ bottom of each phase.
 - **`guard_inside` is checked before every write and every unlink**, using
   lexical normalisation rather than `canonicalize` — the target usually does
   not exist yet at the point the check matters.
+
+## Shipping
+
+- **Long chapters use `content-visibility`, not a windowing library.** A
+  hundred-block chapter has to scroll at 60 fps, but every windowing library
+  removes off-screen rows from the DOM — which breaks `@dnd-kit`'s sortable
+  context, in-page search and anchor links, all of which this app relies on.
+  `content-visibility: auto` with `contain-intrinsic-size` gets the browser to
+  skip layout, style and paint for off-screen blocks while leaving every node
+  where it is. It is disabled on the row being dragged, which has to stay
+  measurable. Video blocks additionally mount their player only once the block
+  is near the viewport, so opening such a chapter does not create a hundred
+  media elements. Measured at 250 scroll ticks in 1.07 s over 120 blocks.
+
+- **`crate-type = ["rlib"]`, dropping `staticlib` and `cdylib`.** The stock
+  Tauri template lists all three to support mobile targets. RustClass is a
+  Windows desktop application, and a `cdylib` of this size exceeds the number
+  of symbols mingw's linker can export — a Windows cross-build fails at the
+  link step for a reason that has nothing to do with the app. The binary links
+  from `main.rs` against the rlib either way.
+
+- **The Windows installer was cross-built with the GNU toolchain here, but MSVC
+  is what should ship.** `cargo-xwin` could not fetch the Microsoft SDK in this
+  environment, so the NSIS installer was produced through
+  `x86_64-pc-windows-gnu` to prove the bundle configuration end to end. On a
+  Windows host `npm run tauri build` uses MSVC by default, which is Tauri's
+  supported toolchain, and produces the same installer.
