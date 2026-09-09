@@ -1,0 +1,179 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* Dark is the default; `.light` on <html> swaps the ramp. */
+  :root {
+    --s0: 12 13 16;
+    --s1: 20 22 27;
+    --s2: 28 31 38;
+    --s3: 39 43 52;
+    --ink: 233 236 242;
+    --ink-muted: 156 163 178;
+    --ink-faint: 108 116 132;
+    --line: 46 51 62;
+    --brand: 226 122 52;
+    --brand-soft: 88 48 22;
+    --danger: 232 93 87;
+    --warn: 226 176 62;
+    --ok: 92 189 128;
+    color-scheme: dark;
+  }
+
+  html:not(.dark) {
+    --s0: 249 249 251;
+    --s1: 255 255 255;
+    --s2: 243 244 247;
+    --s3: 232 234 239;
+    --ink: 26 29 35;
+    --ink-muted: 92 99 112;
+    --ink-faint: 140 147 160;
+    --line: 220 223 230;
+    --brand: 189 88 26;
+    --brand-soft: 250 232 217;
+    --danger: 196 54 47;
+    --warn: 168 118 12;
+    --ok: 39 132 76;
+    color-scheme: light;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-surface-0 text-ink font-sans antialiased;
+    overflow: hidden;
+  }
+
+  /* Every interactive element gets a visible ring — full keyboard operability
+     is a requirement, not a nicety. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-brand ring-offset-2 ring-offset-surface-0;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-surface-3;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-ink-faint;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl border border-line bg-surface-1;
+  }
+
+  .btn {
+    @apply inline-flex select-none items-center justify-center gap-2 rounded-lg
+           border border-line px-3 py-1.5 text-sm font-medium text-ink
+           transition-colors hover:bg-surface-2 disabled:cursor-not-allowed
+           disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply border-transparent bg-brand text-white hover:brightness-110;
+  }
+
+  .btn-ghost {
+    @apply border-transparent text-ink-muted hover:bg-surface-2 hover:text-ink;
+  }
+
+  .btn-danger {
+    @apply border-transparent bg-danger text-white hover:brightness-110;
+  }
+
+  .btn-sm {
+    @apply px-2 py-1 text-xs;
+  }
+
+  .input {
+    @apply w-full rounded-lg border border-line bg-surface-2 px-3 py-2 text-sm
+           text-ink placeholder:text-ink-faint focus:border-brand;
+  }
+
+  .label {
+    @apply mb-1 block text-xs font-medium uppercase tracking-wide text-ink-faint;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border border-line
+           bg-surface-2 px-2 py-0.5 text-xs text-ink-muted;
+  }
+
+  /* Markdown rendered anywhere in the app. */
+  .prose-rc {
+    @apply text-[15px] leading-relaxed text-ink;
+  }
+  .prose-rc > * + * {
+    @apply mt-3;
+  }
+  .prose-rc h1 {
+    @apply mt-6 text-2xl font-semibold;
+  }
+  .prose-rc h2 {
+    @apply mt-6 text-xl font-semibold;
+  }
+  .prose-rc h3 {
+    @apply mt-5 text-lg font-semibold;
+  }
+  .prose-rc p {
+    @apply text-ink;
+  }
+  .prose-rc a {
+    @apply text-brand underline underline-offset-2;
+  }
+  .prose-rc ul {
+    @apply list-disc space-y-1 pl-6;
+  }
+  .prose-rc ol {
+    @apply list-decimal space-y-1 pl-6;
+  }
+  .prose-rc blockquote {
+    @apply border-l-2 border-brand pl-4 italic text-ink-muted;
+  }
+  .prose-rc code {
+    @apply rounded bg-surface-2 px-1.5 py-0.5 font-mono text-[0.9em];
+  }
+  .prose-rc pre {
+    @apply overflow-x-auto rounded-lg bg-surface-2 p-3;
+  }
+  .prose-rc pre code {
+    @apply bg-transparent p-0;
+  }
+  .prose-rc table {
+    @apply w-full border-collapse text-sm;
+  }
+  .prose-rc th,
+  .prose-rc td {
+    @apply border border-line px-2 py-1 text-left;
+  }
+  .prose-rc hr {
+    @apply border-line;
+  }
+  .prose-rc img {
+    @apply max-w-full rounded-lg;
+  }
+}
