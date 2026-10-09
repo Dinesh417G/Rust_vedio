@@ -197,6 +197,10 @@ pub struct Chapter {
     pub created_at: i64,
     pub updated_at: i64,
     pub deleted_at: Option<i64>,
+    /// Top grouping level, e.g. one course inside a bundle.
+    pub part: Option<String>,
+    /// Second grouping level inside a part, e.g. a module.
+    pub section: Option<String>,
 }
 
 /// Chapter plus the block-state histogram the sidebar needs.
@@ -238,6 +242,10 @@ pub struct NewChapter {
     /// Insert directly after this chapter; `None` appends.
     #[serde(default)]
     pub after_id: Option<String>,
+    #[serde(default)]
+    pub part: Option<String>,
+    #[serde(default)]
+    pub section: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -253,6 +261,10 @@ pub struct ChapterPatch {
     #[serde(default, deserialize_with = "double_option")]
     pub estimated_minutes: Option<Option<i64>>,
     pub status: Option<ChapterStatus>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub part: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub section: Option<Option<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

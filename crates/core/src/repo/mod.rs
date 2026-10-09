@@ -29,7 +29,8 @@ impl<'a> ReadCtx<'a> {
 }
 
 pub(crate) const CHAPTER_COLS: &str = "id, course_id, display_number, title, summary_md, \
-     objectives_md, estimated_minutes, status, sort_index, created_at, updated_at, deleted_at";
+     objectives_md, estimated_minutes, status, sort_index, created_at, updated_at, deleted_at, \
+     part, section";
 
 pub(crate) const BLOCK_COLS: &str = "id, chapter_id, kind, heading, caption_md, body_md, \
      code_text, code_lang, asset_id, meta_json, sort_index, created_at, updated_at, deleted_at";
@@ -51,6 +52,8 @@ pub(crate) fn map_chapter(r: &Row<'_>) -> rusqlite::Result<Chapter> {
         created_at: r.get(9)?,
         updated_at: r.get(10)?,
         deleted_at: r.get(11)?,
+        part: r.get(12)?,
+        section: r.get(13)?,
     })
 }
 

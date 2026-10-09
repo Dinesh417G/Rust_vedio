@@ -5,6 +5,7 @@
 use crate::error::{CoreError, Result};
 use crate::ids::new_id;
 use crate::paths::{self, Paths};
+use crate::repo::chapter::clean_group;
 use crate::repo::search;
 use crate::time::now_ms;
 use rusqlite::{params, Connection};
@@ -371,8 +372,8 @@ pub fn import(
         tx.execute(
             "INSERT INTO chapter (id, course_id, display_number, title, summary_md, objectives_md,
                                   estimated_minutes, status, sort_index, created_at, updated_at,
-                                  deleted_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                                  deleted_at, part, section)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 &new_id_,
                 &course_id,
@@ -390,6 +391,9 @@ pub fn import(
                     .and_then(|v| v.as_i64())
                     .unwrap_or(now_ms()),
                 c.get("deleted_at").and_then(|v| v.as_i64()),
+                // Bundles written before v3 carry neither key; both read as NULL.
+                clean_group(as_str(c, "part").as_deref()),
+                clean_group(as_str(c, "section").as_deref()),
             ],
         )?;
         report.chapters += 1;

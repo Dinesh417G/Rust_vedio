@@ -23,6 +23,15 @@ use crate::sortindex;
 use crate::time::now_ms;
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
+/// A part or section that is empty or only whitespace is no grouping at all.
+/// Trimming also keeps "Module 2" and "Module 2 " from becoming two groups.
+pub(crate) fn clean_group(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+}
+
 pub fn list_rows(conn: &Connection, include_deleted: bool) -> Result<Vec<Chapter>> {
     let where_clause = if include_deleted {
         ""
@@ -159,8 +168,9 @@ pub fn insert_in_tx(tx: &Transaction<'_>, course_id: &str, req: &NewChapter) -> 
     let now = now_ms();
     tx.execute(
         "INSERT INTO chapter (id, course_id, display_number, title, summary_md, objectives_md,
-                              estimated_minutes, status, sort_index, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'draft', ?8, ?9, ?9)",
+                              estimated_minutes, status, sort_index, created_at, updated_at,
+                              part, section)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'draft', ?8, ?9, ?9, ?10, ?11)",
         params![
             &id,
             course_id,
@@ -170,7 +180,9 @@ pub fn insert_in_tx(tx: &Transaction<'_>, course_id: &str, req: &NewChapter) -> 
             req.objectives_md,
             req.estimated_minutes,
             key,
-            now
+            now,
+            clean_group(req.part.as_deref()),
+            clean_group(req.section.as_deref())
         ],
     )?;
     search::index_chapter_in_tx(tx, &id)?;
@@ -198,9 +210,18 @@ pub fn update(
     let objectives = patch.objectives_md.unwrap_or(current.objectives_md);
     let minutes = patch.estimated_minutes.unwrap_or(current.estimated_minutes);
     let status = patch.status.unwrap_or(current.status);
+    let part = patch
+        .part
+        .map(|p| clean_group(p.as_deref()))
+        .unwrap_or(current.part);
+    let section = patch
+        .section
+        .map(|s| clean_group(s.as_deref()))
+        .unwrap_or(current.section);
     conn.execute(
         "UPDATE chapter SET title = ?2, display_number = ?3, summary_md = ?4, objectives_md = ?5,
-                estimated_minutes = ?6, status = ?7, updated_at = ?8 WHERE id = ?1",
+                estimated_minutes = ?6, status = ?7, part = ?8, section = ?9, updated_at = ?10
+         WHERE id = ?1",
         params![
             id,
             title,
@@ -209,6 +230,8 @@ pub fn update(
             objectives,
             minutes,
             status.as_str(),
+            part,
+            section,
             now_ms()
         ],
     )?;
@@ -249,8 +272,9 @@ pub fn duplicate(conn: &mut Connection, ctx: &ReadCtx<'_>, id: &str) -> Result<C
         let now = now_ms();
         tx.execute(
             "INSERT INTO chapter (id, course_id, display_number, title, summary_md, objectives_md,
-                                  estimated_minutes, status, sort_index, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'draft', ?8, ?9, ?9)",
+                                  estimated_minutes, status, sort_index, created_at, updated_at,
+                                  part, section)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'draft', ?8, ?9, ?9, ?10, ?11)",
             params![
                 &new_id_,
                 &src.course_id,
@@ -260,7 +284,9 @@ pub fn duplicate(conn: &mut Connection, ctx: &ReadCtx<'_>, id: &str) -> Result<C
                 &src.objectives_md,
                 src.estimated_minutes,
                 key,
-                now
+                now,
+                &src.part,
+                &src.section
             ],
         )?;
         {

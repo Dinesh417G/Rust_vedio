@@ -8,6 +8,18 @@ use crate::paths::{self, Paths};
 use crate::repo::asset as asset_repo;
 use rusqlite::Connection;
 use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+
+/// What two spellings of one file have in common.
+///
+/// `Paths::resolve_rel` joins a `/`-separated relative path onto the media
+/// root, so on Windows the database spells a file `media\2026-10/x.mp4` while
+/// the directory walk reports `media\2026-10\x.mp4`. As text those differ, and
+/// every referenced file was reported as an orphan, which a confirmed run then
+/// deleted. `Path` equality and hashing compare components, so key on that.
+fn file_key(p: &Path) -> PathBuf {
+    dunce::simplified(p).to_path_buf()
+}
 
 pub fn run(conn: &Connection, p: &Paths, dry_run: bool) -> Result<GcReport> {
     let mut report = GcReport {
@@ -16,11 +28,11 @@ pub fn run(conn: &Connection, p: &Paths, dry_run: bool) -> Result<GcReport> {
     };
 
     let rows = asset_repo::list_rows(conn)?;
-    let mut known: HashSet<String> = HashSet::new();
+    let mut known: HashSet<PathBuf> = HashSet::new();
     for row in &rows {
-        known.insert(paths::display_path(&row.absolute(p)));
+        known.insert(file_key(&row.absolute(p)));
         if let Some(t) = &row.thumb_rel_path {
-            known.insert(paths::display_path(&p.resolve_rel(t)));
+            known.insert(file_key(&p.resolve_rel(t)));
         }
     }
 
@@ -57,7 +69,7 @@ pub fn run(conn: &Connection, p: &Paths, dry_run: bool) -> Result<GcReport> {
             });
             continue;
         }
-        if !known.contains(&display) {
+        if !known.contains(&file_key(&file)) {
             report.orphan_files.push(GcEntry {
                 id: display.clone(),
                 label: file

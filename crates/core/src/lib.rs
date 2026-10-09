@@ -71,6 +71,8 @@ pub fn apply_outline(
             estimated_minutes: None,
             template: None,
             after_id: after.clone(),
+            part: None,
+            section: None,
         };
         let chapter_id = repo::chapter::insert_in_tx(&tx, &course.id, &req)?;
         report.chapters_created += 1;
