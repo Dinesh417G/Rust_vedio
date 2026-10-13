@@ -1,0 +1,25 @@
+[package]
+name = "rustclass-library"
+description = "Teaching-library loader for RustClass: parser, snippet checker, coverage report and database loader"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+build = "build.rs"
+
+[lib]
+name = "rustclass_library"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rustclass-library"
+path = "src/main.rs"
+
+[dependencies]
+rustclass-core = { workspace = true }
+rusqlite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

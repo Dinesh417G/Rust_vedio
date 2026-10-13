@@ -3,6 +3,7 @@ pub mod block;
 pub mod bundle;
 pub mod chapter;
 pub mod course;
+pub mod library;
 pub mod outline;
 pub mod progress;
 pub mod system;

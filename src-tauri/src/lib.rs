@@ -98,6 +98,7 @@ pub fn run() {
             commands::outline::outline_preview,
             commands::outline::outline_import_markdown,
             commands::outline::search_query,
+            commands::library::library_load_builtin,
             commands::bundle::bundle_export,
             commands::bundle::bundle_import,
             commands::system::system_info,

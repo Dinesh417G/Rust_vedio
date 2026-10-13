@@ -2982,6 +2982,7 @@ version = "0.1.0"
 dependencies = [
  "rusqlite",
  "rustclass-core",
+ "rustclass-library",
  "serde",
  "serde_json",
  "tauri",
@@ -3013,6 +3014,17 @@ dependencies = [
  "tracing",
  "uuid",
  "zip",
+]
+
+[[package]]
+name = "rustclass-library"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
+ "rustclass-core",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
