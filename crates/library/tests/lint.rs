@@ -17,6 +17,7 @@ const CURRICULUM: &str = "\
 | 1.1.5 | Quiz - Module | Quiz | — |
 | 1.1.6 | Final Exam - Module | Quiz | — |
 | 1.1.7 | Our own page | Own | — |
+| 1.1.8 | Lesson 1.8 - Exercises Overview | Video | 5:07 |
 ";
 
 fn notes(words: usize) -> String {
@@ -302,4 +303,24 @@ fn lint_skips_own_pages_and_flags_unknown_chapters() {
     assert_eq!(issues.len(), 1);
     assert_eq!(issues[0].display, "(no number)");
     assert_eq!((issues[0].file.as_str(), issues[0].line), ("c.md", 3));
+}
+
+#[test]
+fn exercises_overview_is_linted_as_a_normal_lesson() {
+    let h = "@@chapter 1.1.8 | Lesson 1.8 - Exercises Overview | 3";
+    assert_eq!(problems(&lesson(h, 210, &FULL)), Vec::<String>::new());
+    // The exercise-page shape is not accepted for it.
+    let exercise_shape = format!(
+        "{h}
+Summary.
+{VIDEO}{SITUATION}@@text Exercise brief
+Do it.
+         @@callout tip | Hints
+Look.
+@@code rust | Solution - mine
+fn main() {{}}
+         {WATCH_OUT}{}",
+        quiz("Check yourself", 2)
+    );
+    assert!(!problems(&exercise_shape).is_empty());
 }

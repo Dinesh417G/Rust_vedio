@@ -422,6 +422,13 @@ impl<'a> Linter<'a> {
 
 /// Checks every chapter of `lib` against the topic-page layout of its
 /// curriculum type. Issues come back in library order.
+/// An exercise lesson walks through one exercise ("Lesson 2.5 - Exercise A -
+/// Variables"). "Lesson 1.2 - Exercises Overview" is a short tour of the
+/// exercises repo, taught as a normal lesson page.
+fn is_exercise_lesson(title: &str) -> bool {
+    title.contains("Exercise") && !title.contains("Exercises Overview")
+}
+
 pub fn lint(expected: &[Expected], lib: &Library) -> Vec<LintIssue> {
     let by_display: HashMap<&str, &Expected> =
         expected.iter().map(|e| (e.display.as_str(), e)).collect();
@@ -439,7 +446,7 @@ pub fn lint(expected: &[Expected], lib: &Library) -> Vec<LintIssue> {
             ),
             Some(row) => match row.kind.as_str() {
                 "Video" => {
-                    linter.video_page(chapter.title.contains("Exercise"));
+                    linter.video_page(is_exercise_lesson(&chapter.title));
                     if let Some(length) = &row.video {
                         linter.video_length(length);
                     }
