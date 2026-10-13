@@ -159,6 +159,8 @@ export const bundleExport = (destPath: string, includeMedia: boolean) =>
   call<T.ExportReport>("bundle_export", { destPath, includeMedia });
 export const bundleImport = (srcPath: string, mode: T.BundleMode) =>
   call<T.BundleImportReport>("bundle_import", { srcPath, mode });
+export const libraryLoadBuiltin = (mode: T.LoadMode) =>
+  call<T.LibraryLoadReport>("library_load_builtin", { mode });
 export const systemInfo = () => call<T.SystemInfo>("system_info");
 export const integrityCheck = () => call<T.IntegrityIssue[]>("integrity_check");
 export const openPath = (path: string) => call<void>("open_path", { path });

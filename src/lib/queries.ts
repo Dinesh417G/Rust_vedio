@@ -214,6 +214,9 @@ export const useChapterComplete = () =>
       ipc.progressSetChapter(chapterId, completed),
   });
 
+export const useLibraryLoad = () =>
+  useMutation({ mutationFn: (mode: T.LoadMode) => ipc.libraryLoadBuiltin(mode) });
+
 /** Refetches everything — used after a bundle import replaces the world. */
 export function useHardRefresh() {
   const qc = useQueryClient();

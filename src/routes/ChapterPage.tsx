@@ -26,7 +26,7 @@ import {
   useChapters,
   useChapterUpdate,
 } from "@/lib/queries";
-import { useUi } from "@/store/ui";
+import { partKey, sectionKey, useUi } from "@/store/ui";
 import { useImports } from "@/store/imports";
 import { assetKindFor, usePickAndImport, useRelink, useStartImport } from "@/lib/useImport";
 import { blockIdAtPoint, useNativeDrop } from "@/lib/useNativeDrop";
@@ -52,6 +52,7 @@ export function ChapterPage() {
   const selectBlock = useUi((s) => s.selectBlock);
   const flashBlockId = useUi((s) => s.flashBlockId);
   const expandChapter = useUi((s) => s.expandChapter);
+  const revealGroups = useUi((s) => s.revealGroups);
   const toast = useUi((s) => s.toast);
 
   const updateChapter = useChapterUpdate();
@@ -78,6 +79,18 @@ export function ChapterPage() {
   useEffect(() => {
     if (id) expandChapter(id);
   }, [id, expandChapter]);
+
+  // Opening a chapter also opens the course and module it sits in, so the
+  // sidebar shows where you are. Keyed on the group names rather than the
+  // chapter, so moving a chapter to another module follows it there. The list
+  // entry is read first: it is usually cached before the chapter itself is.
+  const where = summary ?? chapter;
+  const part = where?.part?.trim() || null;
+  const section = where?.section?.trim() || null;
+  useEffect(() => {
+    if (!id || !part) return;
+    revealGroups(section ? [partKey(part), sectionKey(part, section)] : [partKey(part)]);
+  }, [id, part, section, revealGroups]);
 
   // A file can vanish while the app is running — a drive unplugged, a folder
   // tidied up. The spec asks for an integrity check on start *and* on chapter
@@ -270,6 +283,10 @@ export function ChapterPage() {
     <div ref={scroller} className="h-full overflow-y-auto">
       <div className="mx-auto max-w-3xl px-8 py-8">
         <ChapterHeader
+          // A fresh header per chapter: an edit still waiting to be saved is sent
+          // when the old one unmounts, with the old chapter's id, instead of
+          // landing on whichever chapter is on screen when the timer fires.
+          key={chapter.id}
           chapter={chapter}
           index={index < 0 ? 0 : index}
           authoring={authoring}

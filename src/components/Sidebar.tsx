@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   DndContext,
@@ -29,13 +29,127 @@ import {
 import * as ipc from "@/lib/ipc";
 import type { BlockView, ChapterSummary } from "@/lib/types";
 import { useChapter, useChapters } from "@/lib/queries";
-import { useUi } from "@/store/ui";
+import { partKey, sectionKey, useUi } from "@/store/ui";
 import { chapterLabel, cx } from "@/lib/format";
 import { StateDot } from "./StateDot";
 import { ProgressBar } from "./ui/ProgressRing";
 import { NewChapterDialog } from "./NewChapterDialog";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { KIND_LABEL } from "./blocks/common";
+
+// --- the outline: Course (part) > Module (section) > Lesson (chapter) -------
+
+/** A chapter and its place in the whole list, which names it when it has no number. */
+interface Lesson {
+  chapter: ChapterSummary;
+  index: number;
+}
+
+interface Tally {
+  chapters: number;
+  blocks: number;
+  done: number;
+}
+
+/** Consecutive lessons of one module — or of a course that has no module. */
+interface SectionGroup {
+  title: string | null;
+  /** `null` when the lessons hang straight off the course. */
+  key: string | null;
+  lessons: Lesson[];
+  tally: Tally;
+}
+
+interface PartGroup {
+  kind: "part";
+  title: string;
+  key: string;
+  sections: SectionGroup[];
+  tally: Tally;
+}
+
+/** Chapters with no course render as a plain list, exactly as before grouping existed. */
+interface FlatRun {
+  kind: "flat";
+  lessons: Lesson[];
+}
+
+type OutlineNode = PartGroup | FlatRun;
+
+const trimmed = (s: string | null | undefined) => s?.trim() || null;
+
+/**
+ * Groups *consecutive* chapters. The list is ordered by `sortIndex` alone and
+ * nothing keeps a course contiguous, so a course that is split by another shows
+ * up as two groups — which is also where its chapters really are.
+ */
+function buildOutline(chapters: ChapterSummary[]): OutlineNode[] {
+  const nodes: OutlineNode[] = [];
+  let part: PartGroup | null = null;
+  let section: SectionGroup | null = null;
+
+  for (let index = 0; index < chapters.length; index++) {
+    const chapter = chapters[index];
+    const lesson: Lesson = { chapter, index };
+    const partTitle = trimmed(chapter.part);
+
+    if (!partTitle) {
+      const last = nodes[nodes.length - 1];
+      if (last?.kind === "flat") last.lessons.push(lesson);
+      else nodes.push({ kind: "flat", lessons: [lesson] });
+      part = null;
+      section = null;
+      continue;
+    }
+
+    if (!part || part.title !== partTitle) {
+      part = {
+        kind: "part",
+        title: partTitle,
+        key: partKey(partTitle),
+        sections: [],
+        tally: { chapters: 0, blocks: 0, done: 0 },
+      };
+      nodes.push(part);
+      section = null;
+    }
+
+    const sectionTitle = trimmed(chapter.section);
+    if (!section || section.title !== sectionTitle) {
+      section = {
+        title: sectionTitle,
+        key: sectionTitle ? sectionKey(partTitle, sectionTitle) : null,
+        lessons: [],
+        tally: { chapters: 0, blocks: 0, done: 0 },
+      };
+      part.sections.push(section);
+    }
+
+    section.lessons.push(lesson);
+    for (const t of [section.tally, part.tally]) {
+      t.chapters += 1;
+      t.blocks += chapter.blockCount;
+      t.done += chapter.completedCount;
+    }
+  }
+  return nodes;
+}
+
+/**
+ * Where a chapter sits, for deciding whether a drag stays inside its group. A
+ * module only means something under a course, so it is ignored without one.
+ */
+function groupOf(c: ChapterSummary): string {
+  const part = trimmed(c.part);
+  return part ? `${part}\u0001${trimmed(c.section) ?? ""}` : "";
+}
+
+const hasChapter = (lessons: Lesson[], id: string | undefined) =>
+  !!id && lessons.some((l) => l.chapter.id === id);
+
+/** The left gutter for each depth; whole strings so Tailwind can see them. */
+const INDENT = ["px-1", "pl-4 pr-1", "pl-7 pr-1"] as const;
+type Indent = 0 | 1 | 2;
 
 export function Sidebar({ onImportOutline }: { onImportOutline: () => void }) {
   const { data: chapters = [], isLoading } = useChapters();
@@ -48,6 +162,11 @@ export function Sidebar({ onImportOutline }: { onImportOutline: () => void }) {
   const mode = useUi((s) => s.mode);
   const authoring = mode === "author";
   const toast = useUi((s) => s.toast);
+  const openGroups = useUi((s) => s.openGroups);
+  const toggleGroup = useUi((s) => s.toggleGroup);
+
+  const outline = useMemo(() => buildOutline(chapters), [chapters]);
+  const byId = useMemo(() => new Map(chapters.map((c) => [c.id, c])), [chapters]);
 
   const [newOpen, setNewOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<ChapterSummary | null>(null);
@@ -81,6 +200,21 @@ export function Sidebar({ onImportOutline }: { onImportOutline: () => void }) {
     async (e: DragEndEvent) => {
       const { active, over } = e;
       if (!over || active.id === over.id) return;
+      const dragged = byId.get(String(active.id));
+      const target = byId.get(String(over.id));
+      if (!dragged || !target) return;
+
+      // Order is only meaningful inside a module. Moving a chapter to another
+      // course or module is a change to what it *is*, and that lives in its header.
+      if (groupOf(dragged) !== groupOf(target)) {
+        toast({
+          tone: "info",
+          message: `"${dragged.title}" can only be reordered inside its own course and module. To move it elsewhere, change its Course or Module in the chapter header.`,
+          action: { label: "Open chapter", run: () => navigate(`/chapter/${dragged.id}`) },
+        });
+        return;
+      }
+
       const to = chapters.findIndex((c) => c.id === over.id);
       const without = chapters.filter((c) => c.id !== active.id);
       const anchor = to === 0 ? null : (without[to - 1]?.id ?? null);
@@ -90,10 +224,77 @@ export function Sidebar({ onImportOutline }: { onImportOutline: () => void }) {
         toast({ tone: "error", message: ipc.asAppError(err).message });
       }
     },
-    [chapters, toast],
+    [byId, chapters, navigate, toast],
   );
 
   if (collapsed) return null;
+
+  /** One sortable list per run, so a drag shuffles only the rows it can land among. */
+  const renderLessons = (lessons: Lesson[], indent: Indent) => (
+    <SortableContext
+      items={lessons.map((l) => l.chapter.id)}
+      strategy={verticalListSortingStrategy}
+    >
+      {lessons.map(({ chapter, index }) => (
+        <ChapterRow
+          key={chapter.id}
+          chapter={chapter}
+          index={index}
+          indent={indent}
+          active={chapter.id === activeId}
+          authoring={authoring}
+          onOpen={() => navigate(`/chapter/${chapter.id}`)}
+          onDelete={() => setPendingDelete(chapter)}
+        />
+      ))}
+    </SortableContext>
+  );
+
+  // Only the rows of open groups are rendered, so ~300 chapters cost a few dozen rows.
+  const renderPart = (part: PartGroup, at: number) => {
+    const partOpen = openGroups.has(part.key);
+    return (
+      <div key={`${part.key}#${at}`} className={cx(at > 0 && "mt-1 border-t border-line pt-1")}>
+        <GroupHeader
+          level={0}
+          title={part.title}
+          tally={part.tally}
+          open={partOpen}
+          current={part.sections.some((s) => hasChapter(s.lessons, activeId))}
+          onToggle={() => toggleGroup(part.key)}
+        />
+        {partOpen && (
+          <div role="group" aria-label={part.title}>
+            {part.sections.map((section, i) => {
+              if (section.key === null) {
+                return (
+                  <Fragment key={`none#${i}`}>{renderLessons(section.lessons, 1)}</Fragment>
+                );
+              }
+              const sectionOpen = openGroups.has(section.key);
+              return (
+                <div key={`${section.key}#${i}`}>
+                  <GroupHeader
+                    level={1}
+                    title={section.title ?? ""}
+                    tally={section.tally}
+                    open={sectionOpen}
+                    current={hasChapter(section.lessons, activeId)}
+                    onToggle={() => section.key && toggleGroup(section.key)}
+                  />
+                  {sectionOpen && (
+                    <div role="group" aria-label={section.title ?? undefined}>
+                      {renderLessons(section.lessons, 2)}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <aside
@@ -143,22 +344,13 @@ export function Sidebar({ onImportOutline }: { onImportOutline: () => void }) {
           modifiers={[restrictToVerticalAxis]}
           onDragEnd={(e) => void onDragEnd(e)}
         >
-          <SortableContext
-            items={chapters.map((c) => c.id)}
-            strategy={verticalListSortingStrategy}
-          >
-            {chapters.map((chapter, i) => (
-              <ChapterRow
-                key={chapter.id}
-                chapter={chapter}
-                index={i}
-                active={chapter.id === activeId}
-                authoring={authoring}
-                onOpen={() => navigate(`/chapter/${chapter.id}`)}
-                onDelete={() => setPendingDelete(chapter)}
-              />
-            ))}
-          </SortableContext>
+          {outline.map((node, at) =>
+            node.kind === "flat" ? (
+              <Fragment key={`flat#${at}`}>{renderLessons(node.lessons, 0)}</Fragment>
+            ) : (
+              renderPart(node, at)
+            ),
+          )}
         </DndContext>
       </nav>
 
@@ -214,9 +406,75 @@ export function Sidebar({ onImportOutline }: { onImportOutline: () => void }) {
   );
 }
 
+/**
+ * A course or module header: a button that opens and closes its group, with
+ * the group's progress (blocks complete over blocks, summed across its chapters)
+ * and its chapter count underneath.
+ */
+function GroupHeader({
+  level,
+  title,
+  tally,
+  open,
+  current,
+  onToggle,
+}: {
+  level: 0 | 1;
+  title: string;
+  tally: Tally;
+  open: boolean;
+  /** The chapter on screen is somewhere inside this group. */
+  current: boolean;
+  onToggle: () => void;
+}) {
+  const percent = tally.blocks > 0 ? (tally.done / tally.blocks) * 100 : 0;
+  const count = `${tally.chapters} chapter${tally.chapters === 1 ? "" : "s"}`;
+  return (
+    <button
+      type="button"
+      aria-expanded={open}
+      aria-label={`${title}: ${tally.done} of ${tally.blocks} blocks complete, ${count}`}
+      title={title}
+      onClick={onToggle}
+      className={cx(
+        "flex w-full items-start gap-1.5 rounded-lg py-1.5 pr-2 text-left transition-colors hover:bg-surface-2",
+        level === 0 ? "pl-2" : "pl-5",
+      )}
+    >
+      <span className="mt-0.5 shrink-0 text-ink-faint">
+        {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span
+          className={cx(
+            "block truncate",
+            level === 0 ? "text-[13px] font-semibold" : "text-xs font-medium",
+            current ? "text-brand" : level === 0 ? "text-ink" : "text-ink-muted",
+          )}
+        >
+          {title}
+        </span>
+        <span className="mt-1 flex items-center gap-2">
+          <ProgressBar percent={percent} className="h-0.5 flex-1" />
+          <span className="shrink-0 text-[10px] tabular-nums text-ink-faint">
+            {tally.done}/{tally.blocks}
+          </span>
+          <span
+            className="shrink-0 rounded-full bg-surface-3 px-1.5 text-[10px] tabular-nums text-ink-muted"
+            title={count}
+          >
+            {tally.chapters}
+          </span>
+        </span>
+      </span>
+    </button>
+  );
+}
+
 function ChapterRow({
   chapter,
   index,
+  indent,
   active,
   authoring,
   onOpen,
@@ -224,6 +482,7 @@ function ChapterRow({
 }: {
   chapter: ChapterSummary;
   index: number;
+  indent: Indent;
   active: boolean;
   authoring: boolean;
   onOpen: () => void;
@@ -245,13 +504,21 @@ function ChapterRow({
   const percent =
     chapter.blockCount > 0 ? (chapter.completedCount / chapter.blockCount) * 100 : 0;
 
+  // Opening a chapter unfolds its groups, which can leave its row below the
+  // fold of a long module; bring it into view once it exists.
+  const row = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (active) row.current?.scrollIntoView({ block: "nearest" });
+  }, [active]);
+
   return (
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform), transition }}
-      className={cx("px-1", isDragging && "opacity-60")}
+      className={cx(INDENT[indent], isDragging && "opacity-60")}
     >
       <div
+        ref={row}
         className={cx(
           "group flex items-center gap-1 rounded-lg px-1.5 py-1.5 transition-colors",
           active ? "bg-brand/15" : "hover:bg-surface-2",
