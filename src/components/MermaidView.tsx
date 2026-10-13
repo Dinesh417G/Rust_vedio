@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import type { Mermaid } from "mermaid";
 import { useUi } from "@/store/ui";
 import { cx } from "@/lib/format";
@@ -25,6 +25,27 @@ function loadMermaid(): Promise<Mermaid> {
   return mermaidPromise;
 }
 
+let scratch: HTMLElement | null = null;
+
+/**
+ * Where Mermaid measures its labels. Left to itself it measures in a bare <div>
+ * in <body>, outside the `.rc-mermaid` host, so the app's own `.label` style
+ * would apply there (12 px, uppercase) and the boxes would be sized for text
+ * that is not what ends up on screen. Inside an `.rc-mermaid` element it
+ * measures what it will draw.
+ */
+function scratchHost(): HTMLElement {
+  if (!scratch || !scratch.isConnected) {
+    scratch = document.createElement("div");
+    scratch.className = "rc-mermaid";
+    scratch.setAttribute("aria-hidden", "true");
+    scratch.style.cssText =
+      "position:fixed;left:-10000px;top:0;visibility:hidden;pointer-events:none";
+    document.body.appendChild(scratch);
+  }
+  return scratch;
+}
+
 let chain: Promise<unknown> = Promise.resolve();
 let nextId = 0;
 
@@ -47,7 +68,7 @@ function draw(source: string, dark: boolean): Promise<string> {
       suppressErrorRendering: true,
     });
     try {
-      const { svg } = await mermaid.render(id, source);
+      const { svg } = await mermaid.render(id, source, scratchHost());
       return svg;
     } finally {
       // Mermaid measures inside a scratch element in <body>; make sure it is gone.
@@ -57,6 +78,17 @@ function draw(source: string, dark: boolean): Promise<string> {
   const result = chain.then(step);
   chain = result.catch(() => undefined);
   return result;
+}
+
+/**
+ * Natural width of a drawn diagram, from its viewBox. The SVG is laid out from
+ * this (see `.rc-mermaid-svg` in index.css) instead of Mermaid's own
+ * `width: 100%`, which squeezes a wide diagram until its labels are unreadable.
+ */
+function naturalWidth(svg: string): number | null {
+  const m = /viewBox="\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)/.exec(svg);
+  const w = m ? Number(m[1]) : NaN;
+  return Number.isFinite(w) && w > 0 ? w : null;
 }
 
 /** Mermaid's messages run to several lines with a caret diagram; one line is enough here. */
@@ -78,6 +110,7 @@ export function MermaidView({ code, className }: { code: string; className?: str
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const source = code.trim();
+  const width = svg === null ? null : naturalWidth(svg);
 
   useEffect(() => {
     if (!source) {
@@ -129,7 +162,7 @@ export function MermaidView({ code, className }: { code: string; className?: str
       aria-label="Diagram"
       aria-busy={svg === null}
       className={cx(
-        "overflow-x-auto rounded-lg border border-line bg-surface-2 p-3",
+        "rc-mermaid overflow-x-auto rounded-lg border border-line bg-surface-2 p-3",
         svg === null && "min-h-[4rem]",
         className,
       )}
@@ -137,10 +170,13 @@ export function MermaidView({ code, className }: { code: string; className?: str
       {svg === null ? (
         <span className="block py-3 text-center text-xs text-ink-faint">Drawing diagram…</span>
       ) : (
-        // Mermaid sizes its SVG as `width: 100%` capped by `max-width`, so the
-        // parent has to be a full-width block for the percentage to mean anything.
+        // The SVG is drawn at its natural width, or the container's if that is
+        // narrower, but never below 85% of natural: a wider diagram scrolls
+        // sideways in the box instead of shrinking its text. The parent has to be
+        // a full-width block for the 100% in that rule to mean anything.
         <div
-          className="[&_svg]:mx-auto [&_svg]:block [&_svg]:h-auto [&_svg]:max-w-full"
+          className="rc-mermaid-svg [&_svg]:mx-auto [&_svg]:block [&_svg]:h-auto"
+          style={width ? ({ "--rc-w": width } as CSSProperties) : undefined}
           dangerouslySetInnerHTML={{ __html: svg }}
         />
       )}

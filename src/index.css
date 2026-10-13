@@ -114,8 +114,17 @@
            text-ink placeholder:text-ink-faint focus:border-brand;
   }
 
-  .label {
+  /* Form-field caption. Not inside a Mermaid diagram: Mermaid also puts
+     `label` on its own nodes, and this would uppercase and shrink them. */
+  .label:not(.rc-mermaid *) {
     @apply mb-1 block text-xs font-medium uppercase tracking-wide text-ink-faint;
+  }
+
+  /* Mermaid SVG sizing; --rc-w is the diagram's natural width in px (MermaidView).
+     Fills the box up to natural size, never shrinks below 85% of it. */
+  .rc-mermaid-svg[style*="--rc-w"] svg {
+    width: max(min(100%, calc(var(--rc-w) * 1px)), calc(var(--rc-w) * 0.85px)) !important;
+    max-width: none !important;
   }
 
   .chip {
