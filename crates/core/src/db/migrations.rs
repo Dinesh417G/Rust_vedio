@@ -108,6 +108,13 @@ CREATE VIRTUAL TABLE search_idx USING fts5(
     r#"
 CREATE INDEX idx_asset_bytes ON asset(bytes);
 "#,
+    // ---- v3: group chapters under a part and a section ---------------------
+    // A bundle of courses reads as Course -> Module -> Lesson. Both columns are
+    // optional, so a plain flat course keeps rendering exactly as before.
+    r#"
+ALTER TABLE chapter ADD COLUMN part TEXT;
+ALTER TABLE chapter ADD COLUMN section TEXT;
+"#,
 ];
 
 pub fn current_version(conn: &Connection) -> Result<i64> {
@@ -161,6 +168,33 @@ mod tests {
             )
             .unwrap();
         assert_eq!(n, 1, "v2 did not apply on top of v1");
+    }
+
+    #[test]
+    fn v3_leaves_chapters_from_a_v2_database_ungrouped() {
+        // An existing library must open untouched: its chapters simply have no
+        // part or section until someone assigns one.
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(MIGRATIONS[0]).unwrap();
+        conn.execute_batch(MIGRATIONS[1]).unwrap();
+        conn.pragma_update(None, "user_version", 2).unwrap();
+        conn.execute_batch(
+            "INSERT INTO course (id, title, created_at, updated_at) VALUES ('c', 'Course', 1, 1);
+             INSERT INTO chapter (id, course_id, title, sort_index, created_at, updated_at)
+             VALUES ('ch', 'c', 'Old chapter', 1024.0, 1, 1);",
+        )
+        .unwrap();
+
+        assert_eq!(migrate(&mut conn).unwrap(), target_version());
+        let (title, part, section): (String, Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT title, part, section FROM chapter WHERE id = 'ch'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(title, "Old chapter");
+        assert_eq!((part, section), (None, None));
     }
 
     #[test]

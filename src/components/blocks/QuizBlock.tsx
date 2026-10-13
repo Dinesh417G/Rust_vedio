@@ -2,11 +2,14 @@ import { useState } from "react";
 import { Check, CircleHelp, Plus, Trash2, X } from "lucide-react";
 import { useInlineEditor } from "@/lib/useInlineEditor";
 import { BlockShell, EmptyCard } from "../BlockShell";
-import { Markdown } from "../Markdown";
+import { InlineMarkdown, Markdown } from "../Markdown";
 import { cx } from "@/lib/format";
 import type { QuizQuestion } from "@/lib/types";
 import { quizMeta, type BlockRendererProps } from "./common";
 import { shellProps } from "./TextBlock";
+
+/** Quiz text sits inside a button or a paragraph: keep its size and colour, and no block wrappers. */
+const INLINE = "!text-inherit !text-[length:inherit] !leading-[inherit]";
 
 const newId = () => `q${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
@@ -169,7 +172,11 @@ export function QuizBlock(props: BlockRendererProps) {
           <div key={q.id} className="card p-4">
             <p className="mb-3 text-sm font-medium text-ink">
               <span className="mr-2 text-ink-faint">{qi + 1}.</span>
-              {q.prompt || <span className="text-ink-faint">(no question text)</span>}
+              {q.prompt.trim() ? (
+                <InlineMarkdown className={INLINE}>{q.prompt}</InlineMarkdown>
+              ) : (
+                <span className="text-ink-faint">(no question text)</span>
+              )}
             </p>
             <div className="space-y-1.5">
               {q.choices.map((choice, ci) => {
@@ -192,7 +199,13 @@ export function QuizBlock(props: BlockRendererProps) {
                     {answered && isPicked && !isAnswer && (
                       <X size={14} className="text-danger" />
                     )}
-                    <span>{choice || <span className="text-ink-faint">(empty)</span>}</span>
+                    <span>
+                      {choice.trim() ? (
+                        <InlineMarkdown className={INLINE}>{choice}</InlineMarkdown>
+                      ) : (
+                        <span className="text-ink-faint">(empty)</span>
+                      )}
+                    </span>
                   </button>
                 );
               })}

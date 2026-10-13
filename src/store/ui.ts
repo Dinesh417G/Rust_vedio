@@ -1,7 +1,7 @@
 /**
  * Pure UI state. Nothing here is course data — that lives in SQLite, always.
- * The few things persisted (theme, sidebar width, import mode) go through the
- * Tauri store plugin, not browser storage.
+ * The few things persisted (theme, sidebar width, import mode, which outline
+ * groups are open) go through the Tauri store plugin, not browser storage.
  */
 import { create } from "zustand";
 import { load, type Store } from "@tauri-apps/plugin-store";
@@ -17,6 +17,16 @@ interface Toast {
   action?: { label: string; run: () => void };
 }
 
+/**
+ * Keys of `openGroups`. A section's key carries its part, because two courses
+ * can each have a "Module 1".
+ */
+export const partKey = (part: string) => `p:${part}`;
+export const sectionKey = (part: string, section: string) => `s:${part}\u0001${section}`;
+
+/** Keys outlive the groups they name (a renamed course), so the saved list is bounded. */
+const MAX_OPEN_GROUPS = 256;
+
 interface UiState {
   mode: Mode;
   theme: Theme;
@@ -25,6 +35,8 @@ interface UiState {
   inspectorOpen: boolean;
   selectedBlockId: string | null;
   expandedChapters: Set<string>;
+  /** Course and module groups that are open in the sidebar; everything else is collapsed. */
+  openGroups: Set<string>;
   paletteOpen: boolean;
   shortcutsOpen: boolean;
   flashBlockId: string | null;
@@ -43,6 +55,9 @@ interface UiState {
   selectBlock: (id: string | null) => void;
   toggleChapter: (id: string) => void;
   expandChapter: (id: string) => void;
+  toggleGroup: (key: string) => void;
+  /** Opens groups without ever closing one — what opening a chapter does. */
+  revealGroups: (keys: string[]) => void;
   setPaletteOpen: (open: boolean) => void;
   setShortcutsOpen: (open: boolean) => void;
   flashBlock: (id: string | null) => void;
@@ -73,6 +88,21 @@ async function persist(key: string, value: unknown) {
   await s?.set(key, value);
 }
 
+/** The newest keys win when the list overflows; a `Set` iterates oldest first. */
+function capped(groups: Set<string>): Set<string> {
+  if (groups.size <= MAX_OPEN_GROUPS) return groups;
+  return new Set([...groups].slice(groups.size - MAX_OPEN_GROUPS));
+}
+
+// Opening a chapter reveals its groups, and that can happen before `hydrate`
+// has read what was saved. Writing then would replace the saved list with just
+// the revealed keys, so writes wait until `hydrate` has merged the two.
+let groupsHydrated = false;
+
+function persistGroups(groups: Set<string>) {
+  if (groupsHydrated) void persist("openGroups", [...groups]);
+}
+
 export const useUi = create<UiState>((set, get) => ({
   mode: "author",
   theme: "dark",
@@ -81,6 +111,7 @@ export const useUi = create<UiState>((set, get) => ({
   inspectorOpen: true,
   selectedBlockId: null,
   expandedChapters: new Set<string>(),
+  openGroups: new Set<string>(),
   paletteOpen: false,
   shortcutsOpen: false,
   flashBlockId: null,
@@ -133,6 +164,23 @@ export const useUi = create<UiState>((set, get) => ({
       return { expandedChapters: next };
     }),
 
+  toggleGroup: (key) => {
+    const next = new Set(get().openGroups);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    const openGroups = capped(next);
+    set({ openGroups });
+    persistGroups(openGroups);
+  },
+  revealGroups: (keys) => {
+    const current = get().openGroups;
+    const closed = keys.filter((k) => !current.has(k));
+    if (closed.length === 0) return;
+    const openGroups = capped(new Set([...current, ...closed]));
+    set({ openGroups });
+    persistGroups(openGroups);
+  },
+
   setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
   setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
   flashBlock: (flashBlockId) => {
@@ -162,6 +210,7 @@ export const useUi = create<UiState>((set, get) => ({
     const s = await settingsStore();
     if (!s) {
       document.documentElement.classList.add("dark");
+      groupsHydrated = true;
       return;
     }
     const theme = ((await s.get<Theme>("theme")) ?? "dark") as Theme;
@@ -171,6 +220,13 @@ export const useUi = create<UiState>((set, get) => ({
     const inspector = (await s.get<boolean>("inspectorOpen")) ?? true;
     const importMode = ((await s.get<ImportMode>("defaultImportMode")) ??
       "copy") as ImportMode;
+    const saved = await s.get<string[]>("openGroups");
+    const restored = Array.isArray(saved)
+      ? saved.filter((k): k is string => typeof k === "string")
+      : [];
+    // Groups revealed before this ran (a chapter that was already open) stay open.
+    const revealed = [...get().openGroups].filter((k) => !restored.includes(k));
+    const openGroups = capped(new Set([...restored, ...revealed]));
     document.documentElement.classList.toggle("dark", theme === "dark");
     set({
       theme,
@@ -179,6 +235,9 @@ export const useUi = create<UiState>((set, get) => ({
       sidebarCollapsed: collapsed,
       inspectorOpen: inspector,
       defaultImportMode: importMode,
+      openGroups,
     });
+    groupsHydrated = true;
+    if (revealed.length > 0) persistGroups(openGroups);
   },
 }));

@@ -1,12 +1,25 @@
 import { useEffect, useState } from "react";
+import { Code2, Workflow } from "lucide-react";
 import { cx } from "@/lib/format";
+import { MermaidView } from "./MermaidView";
 
 /** The only languages this course needs. Loading more costs startup time. */
-export const CODE_LANGS = ["rust", "toml", "bash", "json", "text"] as const;
+export const CODE_LANGS = ["rust", "toml", "bash", "json", "text", "mermaid"] as const;
 export type CodeLang = (typeof CODE_LANGS)[number];
+
+/** Fence tags people actually type, mapped onto the languages above. */
+const ALIASES = new Map<string, CodeLang>([
+  ["rs", "rust"],
+  ["sh", "bash"],
+  ["shell", "bash"],
+  ["zsh", "bash"],
+  ["jsonc", "json"],
+]);
 
 export function normalizeLang(lang: string | null | undefined): CodeLang {
   const l = (lang ?? "rust").toLowerCase();
+  const alias = ALIASES.get(l);
+  if (alias) return alias;
   return (CODE_LANGS as readonly string[]).includes(l) ? (l as CodeLang) : "text";
 }
 
@@ -58,7 +71,42 @@ async function getHighlighter(): Promise<Highlighter> {
   return highlighterPromise;
 }
 
+/** Highlighted code, or a diagram for `mermaid` with a switch to its source. */
 export function CodeView({
+  code,
+  lang,
+  className,
+}: {
+  code: string;
+  lang: string | null | undefined;
+  className?: string;
+}) {
+  if (normalizeLang(lang) === "mermaid") {
+    return <DiagramView code={code} className={className} />;
+  }
+  return <HighlightedCode code={code} lang={lang} className={className} />;
+}
+
+function DiagramView({ code, className }: { code: string; className?: string }) {
+  const [showSource, setShowSource] = useState(false);
+  return (
+    <div className={className}>
+      {showSource ? <HighlightedCode code={code} lang="text" /> : <MermaidView code={code} />}
+      <div className="mt-1 flex justify-end">
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={() => setShowSource((v) => !v)}
+        >
+          {showSource ? <Workflow size={13} /> : <Code2 size={13} />}
+          {showSource ? "Show diagram" : "Show source"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function HighlightedCode({
   code,
   lang,
   className,
@@ -95,6 +143,9 @@ export function CodeView({
       className={cx(
         "overflow-x-auto rounded-lg border border-line bg-surface-2 text-[13px] leading-relaxed",
         "[&_pre]:!bg-transparent [&_pre]:p-3 [&_code]:font-mono",
+        // The highlighter sets two colour variables per token, one per theme,
+        // and leaves choosing between them to the page.
+        "[&_.shiki_span]:[color:var(--shiki-light)] dark:[&_.shiki_span]:[color:var(--shiki-dark)]",
         className,
       )}
     >

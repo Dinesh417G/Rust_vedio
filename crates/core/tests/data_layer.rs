@@ -61,6 +61,8 @@ impl Harness {
                 estimated_minutes: None,
                 template,
                 after_id: None,
+                part: None,
+                section: None,
             },
         )
         .expect("create chapter")
@@ -164,6 +166,8 @@ fn chapter_four_renders_with_no_video_uploaded_and_survives_a_restart() {
                 estimated_minutes: Some(35),
                 template: None,
                 after_id: None,
+                part: None,
+                section: None,
             },
         )
         .unwrap()
@@ -1437,4 +1441,407 @@ fn block_state_never_reaches_the_database() {
         state::compute(&b, state::AssetStatus::None, false),
         BlockState::Empty
     );
+}
+
+// ---------------------------------------------------------------------------
+// Grouping: part and section
+// ---------------------------------------------------------------------------
+
+/// A chapter request that carries a title and its grouping, nothing else.
+fn grouped(title: &str, part: Option<&str>, section: Option<&str>) -> NewChapter {
+    NewChapter {
+        title: title.into(),
+        display_number: None,
+        summary_md: None,
+        objectives_md: None,
+        estimated_minutes: None,
+        template: None,
+        after_id: None,
+        part: part.map(String::from),
+        section: section.map(String::from),
+    }
+}
+
+/// Asserts one chapter's grouping through both read paths the UI uses: the
+/// sidebar list and the chapter page.
+fn assert_grouping(h: &Harness, id: &str, part: Option<&str>, section: Option<&str>) {
+    let none = HashSet::new();
+    let ctx = ReadCtx::new(&h.paths, &none);
+    let listed = chapter::list(&h.conn, &ctx, false)
+        .unwrap()
+        .into_iter()
+        .find(|c| c.chapter.id == id)
+        .expect("the chapter is listed")
+        .chapter;
+    let got = chapter::get(&h.conn, &ctx, id).unwrap().chapter;
+    for (how, c) in [("list", &listed), ("get", &got)] {
+        assert_eq!(c.part.as_deref(), part, "part read through {how}");
+        assert_eq!(c.section.as_deref(), section, "section read through {how}");
+    }
+}
+
+#[test]
+fn chapter_part_and_section_round_trip() {
+    let mut h = Harness::new();
+    let none = HashSet::new();
+
+    let id = {
+        let ctx = ReadCtx::new(&h.paths, &none);
+        chapter::create(
+            &mut h.conn,
+            &ctx,
+            grouped(
+                "Variables",
+                Some("1 · Ultimate Rust Crash Course"),
+                Some("Module 2: Fundamentals"),
+            ),
+        )
+        .unwrap()
+        .chapter
+        .id
+    };
+    assert_grouping(
+        &h,
+        &id,
+        Some("1 · Ultimate Rust Crash Course"),
+        Some("Module 2: Fundamentals"),
+    );
+
+    // One patch changes both.
+    {
+        let ctx = ReadCtx::new(&h.paths, &none);
+        let updated = chapter::update(
+            &h.conn,
+            &ctx,
+            &id,
+            ChapterPatch {
+                part: Some(Some("2 · Intermediate Rust".into())),
+                section: Some(Some("Module 5: Traits".into())),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            updated.chapter.part.as_deref(),
+            Some("2 · Intermediate Rust")
+        );
+        assert_eq!(updated.chapter.section.as_deref(), Some("Module 5: Traits"));
+    }
+    assert_grouping(
+        &h,
+        &id,
+        Some("2 · Intermediate Rust"),
+        Some("Module 5: Traits"),
+    );
+
+    // A patch that does not mention them leaves them alone.
+    {
+        let ctx = ReadCtx::new(&h.paths, &none);
+        chapter::update(
+            &h.conn,
+            &ctx,
+            &id,
+            ChapterPatch {
+                title: Some("Variables and mutability".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    }
+    assert_grouping(
+        &h,
+        &id,
+        Some("2 · Intermediate Rust"),
+        Some("Module 5: Traits"),
+    );
+
+    // An explicit null clears one and leaves the other where it was.
+    {
+        let ctx = ReadCtx::new(&h.paths, &none);
+        let cleared = chapter::update(
+            &h.conn,
+            &ctx,
+            &id,
+            ChapterPatch {
+                section: Some(None),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(cleared.chapter.section, None);
+    }
+    assert_grouping(&h, &id, Some("2 · Intermediate Rust"), None);
+
+    let h = h.restart();
+    assert_grouping(&h, &id, Some("2 · Intermediate Rust"), None);
+}
+
+#[test]
+fn a_blank_part_or_section_means_no_grouping_and_padding_is_trimmed() {
+    let mut h = Harness::new();
+    let none = HashSet::new();
+    let (blank, padded) = {
+        let ctx = ReadCtx::new(&h.paths, &none);
+        let blank = chapter::create(&mut h.conn, &ctx, grouped("Blank", Some("   "), Some("")))
+            .unwrap()
+            .chapter
+            .id;
+        let padded = chapter::create(
+            &mut h.conn,
+            &ctx,
+            grouped("Padded", Some("  1 · Course "), Some("\tModule 1\n")),
+        )
+        .unwrap()
+        .chapter
+        .id;
+        (blank, padded)
+    };
+    assert_grouping(&h, &blank, None, None);
+    assert_grouping(&h, &padded, Some("1 · Course"), Some("Module 1"));
+
+    // The same rule applies to a patch: whitespace-only clears, padding goes.
+    {
+        let ctx = ReadCtx::new(&h.paths, &none);
+        chapter::update(
+            &h.conn,
+            &ctx,
+            &padded,
+            ChapterPatch {
+                part: Some(Some("  ".into())),
+                section: Some(Some(" Module 2 ".into())),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    }
+    assert_grouping(&h, &padded, None, Some("Module 2"));
+}
+
+#[test]
+fn duplicate_keeps_part_and_section() {
+    let mut h = Harness::new();
+    let none = HashSet::new();
+    let (grouped_id, plain_id) = {
+        let ctx = ReadCtx::new(&h.paths, &none);
+        let g = chapter::create(
+            &mut h.conn,
+            &ctx,
+            grouped(
+                "Closures",
+                Some("2 · Intermediate Rust"),
+                Some("Module 4: Functions"),
+            ),
+        )
+        .unwrap()
+        .chapter
+        .id;
+        let p = chapter::create(&mut h.conn, &ctx, grouped("Loose end", None, None))
+            .unwrap()
+            .chapter
+            .id;
+        (g, p)
+    };
+
+    let (copy, plain_copy) = {
+        let ctx = ReadCtx::new(&h.paths, &none);
+        (
+            chapter::duplicate(&mut h.conn, &ctx, &grouped_id).unwrap(),
+            chapter::duplicate(&mut h.conn, &ctx, &plain_id).unwrap(),
+        )
+    };
+    assert_ne!(copy.chapter.id, grouped_id);
+    assert_eq!(copy.chapter.title, "Closures (copy)");
+    assert_grouping(
+        &h,
+        &copy.chapter.id,
+        Some("2 · Intermediate Rust"),
+        Some("Module 4: Functions"),
+    );
+    // The original is untouched, and an ungrouped chapter stays ungrouped.
+    assert_grouping(
+        &h,
+        &grouped_id,
+        Some("2 · Intermediate Rust"),
+        Some("Module 4: Functions"),
+    );
+    assert_grouping(&h, &plain_copy.chapter.id, None, None);
+}
+
+#[test]
+fn bundle_round_trip_keeps_part_and_section() {
+    let mut h = Harness::new();
+    let none = HashSet::new();
+    for req in [
+        grouped(
+            "Ownership",
+            Some("1 · Ultimate Rust Crash Course"),
+            Some("Module 2: Fundamentals"),
+        ),
+        grouped("Traits", Some("2 · Intermediate Rust"), None),
+        grouped("Loose end", None, None),
+    ] {
+        let ctx = ReadCtx::new(&h.paths, &none);
+        chapter::create(&mut h.conn, &ctx, req).unwrap();
+    }
+
+    let path = h._dir.path().join("grouped.rcbundle");
+    let exported = bundle::export(&h.conn, &h.paths, &path, false, "test").unwrap();
+    assert_eq!(exported.chapters, 3);
+
+    // The manifest itself names the columns, so a newer reader can find them.
+    {
+        use std::io::Read;
+        let mut zip = zip::ZipArchive::new(std::fs::File::open(&path).unwrap()).unwrap();
+        let mut text = String::new();
+        zip.by_name("manifest.json")
+            .unwrap()
+            .read_to_string(&mut text)
+            .unwrap();
+        let manifest: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let rows = manifest["tables"]["chapter"].as_array().unwrap();
+        assert!(rows
+            .iter()
+            .all(|r| r.get("part").is_some() && r.get("section").is_some()));
+    }
+
+    let mut fresh = Harness::new();
+    let report = bundle::import(&mut fresh.conn, &fresh.paths, &path, BundleMode::Replace).unwrap();
+    assert_eq!(report.chapters, 3);
+
+    let fresh = fresh.restart();
+    let ctx = ReadCtx::new(&fresh.paths, &none);
+    let after: Vec<(String, Option<String>, Option<String>)> =
+        chapter::list(&fresh.conn, &ctx, false)
+            .unwrap()
+            .into_iter()
+            .map(|c| (c.chapter.title, c.chapter.part, c.chapter.section))
+            .collect();
+    assert_eq!(
+        after,
+        vec![
+            (
+                "Ownership".to_string(),
+                Some("1 · Ultimate Rust Crash Course".to_string()),
+                Some("Module 2: Fundamentals".to_string())
+            ),
+            (
+                "Traits".to_string(),
+                Some("2 · Intermediate Rust".to_string()),
+                None
+            ),
+            ("Loose end".to_string(), None, None),
+        ],
+        "part and section must come out of the bundle exactly as they went in"
+    );
+}
+
+#[test]
+fn a_bundle_written_before_grouping_imports_with_no_part_or_section() {
+    let mut h = Harness::new();
+    let path = h._dir.path().join("before-grouping.rcbundle");
+    let file = std::fs::File::create(&path).unwrap();
+    let mut zip = zip::ZipWriter::new(file);
+    zip.start_file::<_, ()>("manifest.json", zip::write::FileOptions::default())
+        .unwrap();
+    use std::io::Write;
+    // Bundle schema v1 as the first release wrote it: no `part`, no `section`.
+    zip.write_all(
+        br#"{"schemaVersion":1,"appVersion":"0.1.0","exportedAt":0,"includesMedia":false,
+            "tables":{"chapter":[{"id":"old-1","course_id":"old-course","display_number":"1",
+            "title":"Written before grouping","status":"draft","sort_index":1024.0,
+            "created_at":1,"updated_at":1,"deleted_at":null}]}}"#,
+    )
+    .unwrap();
+    zip.finish().unwrap();
+
+    let report = bundle::import(&mut h.conn, &h.paths, &path, BundleMode::Replace).unwrap();
+    assert_eq!(report.chapters, 1);
+
+    let none = HashSet::new();
+    let id = {
+        let ctx = ReadCtx::new(&h.paths, &none);
+        let chapters = chapter::list(&h.conn, &ctx, false).unwrap();
+        assert_eq!(chapters[0].chapter.title, "Written before grouping");
+        chapters[0].chapter.id.clone()
+    };
+    assert_grouping(&h, &id, None, None);
+}
+
+#[test]
+fn outline_import_leaves_part_and_section_empty() {
+    let mut h = Harness::new();
+    let parsed =
+        outline::parse("# A course\n## 1. One\n- [text] Notes\n## 2. Two\n- [video] Lesson");
+    rustclass_core::apply_outline(&mut h.conn, &parsed, OutlineMode::Append).unwrap();
+
+    let none = HashSet::new();
+    let ctx = ReadCtx::new(&h.paths, &none);
+    let chapters = chapter::list(&h.conn, &ctx, false).unwrap();
+    assert_eq!(chapters.len(), 2);
+    assert!(
+        chapters
+            .iter()
+            .all(|c| c.chapter.part.is_none() && c.chapter.section.is_none()),
+        "an outline carries no grouping, so none may appear"
+    );
+}
+
+#[test]
+fn migration_v3_adds_part_and_section() {
+    let h = Harness::new();
+    let version: i64 = h
+        .conn
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, 3, "a fresh database sits at the v3 schema");
+
+    let columns: Vec<String> = {
+        let mut stmt = h
+            .conn
+            .prepare("SELECT name FROM pragma_table_info('chapter')")
+            .unwrap();
+        let names = stmt
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<String>>>()
+            .unwrap();
+        names
+    };
+    for wanted in ["part", "section"] {
+        assert!(
+            columns.iter().any(|c| c == wanted),
+            "chapter.{wanted} is missing; columns are {columns:?}"
+        );
+    }
+}
+
+#[test]
+fn part_and_section_cross_the_ipc_boundary_as_camel_case_json() {
+    // Patch: absent keeps, null clears, a string sets.
+    let absent: ChapterPatch = serde_json::from_str("{}").unwrap();
+    assert_eq!((absent.part, absent.section), (None, None));
+    let patch: ChapterPatch =
+        serde_json::from_str(r#"{"part":null,"section":"Module 2"}"#).unwrap();
+    assert_eq!(patch.part, Some(None));
+    assert_eq!(patch.section, Some(Some("Module 2".to_string())));
+
+    // A create request may leave both out.
+    let req: NewChapter = serde_json::from_str(r#"{"title":"T"}"#).unwrap();
+    assert!((req.part, req.section) == (None, None));
+    let req: NewChapter =
+        serde_json::from_str(r#"{"title":"T","part":"P","section":"S"}"#).unwrap();
+    assert_eq!(req.part.as_deref(), Some("P"));
+    assert_eq!(req.section.as_deref(), Some("S"));
+
+    // What the webview receives: top-level keys, null when ungrouped.
+    let mut h = Harness::new();
+    let none = HashSet::new();
+    let ctx = ReadCtx::new(&h.paths, &none);
+    let view = chapter::create(&mut h.conn, &ctx, grouped("T", Some("P"), None)).unwrap();
+    let json = serde_json::to_value(&view).unwrap();
+    assert_eq!(json["part"], "P");
+    assert!(json.get("section").is_some_and(|v| v.is_null()));
+    let summaries = chapter::list(&h.conn, &ctx, false).unwrap();
+    let json = serde_json::to_value(&summaries[0]).unwrap();
+    assert_eq!(json["part"], "P");
 }

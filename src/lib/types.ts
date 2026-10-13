@@ -21,6 +21,7 @@ export type ChapterStatus = "draft" | "published";
 export type ChapterTemplate = "blank" | "lesson" | "concept" | "practice";
 export type OutlineMode = "append" | "replace";
 export type BundleMode = "merge" | "replace";
+export type LoadMode = "replace" | "append";
 
 export interface CourseView {
   id: string;
@@ -50,6 +51,10 @@ export interface Chapter {
   objectivesMd: string | null;
   estimatedMinutes: number | null;
   status: ChapterStatus;
+  /** A course inside the bundle, e.g. "1 · Ultimate Rust Crash Course". */
+  part: string | null;
+  /** A module inside that part, e.g. "Module 2: Fundamentals". */
+  section: string | null;
   sortIndex: number;
   createdAt: number;
   updatedAt: number;
@@ -74,6 +79,8 @@ export interface NewChapter {
   summaryMd?: string | null;
   objectivesMd?: string | null;
   estimatedMinutes?: number | null;
+  part?: string | null;
+  section?: string | null;
   template?: ChapterTemplate | null;
   afterId?: string | null;
 }
@@ -85,6 +92,9 @@ export interface ChapterPatch {
   objectivesMd?: string | null;
   estimatedMinutes?: number | null;
   status?: ChapterStatus;
+  /** Absent keeps the value, `null` clears it, a string sets it. Same for `section`. */
+  part?: string | null;
+  section?: string | null;
 }
 
 export interface Block {
@@ -273,6 +283,14 @@ export interface OutlineImportReport {
   blocksCreated: number;
   chaptersRemoved: number;
   courseTitleChanged: boolean;
+  warnings: string[];
+}
+
+export interface LibraryLoadReport {
+  chaptersCreated: number;
+  blocksCreated: number;
+  chaptersRemoved: number;
+  files: number;
   warnings: string[];
 }
 
